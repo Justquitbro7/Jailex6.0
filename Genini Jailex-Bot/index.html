@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>JAILEX HUD | v1.3.0</title>
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;900&family=Inter:wght@400;700&display=swap">
+    <style>
+        :root { --blue: #00d2ff; --dark: #060e1a; --glass: rgba(10, 25, 47, 0.9); }
+        body { background: var(--dark); color: white; font-family: 'Inter', sans-serif; margin: 0; display: flex; height: 100vh; overflow: hidden; }
+        
+        .sidebar { width: 260px; background: rgba(0,0,0,0.4); border-right: 1px solid rgba(0,210,255,0.1); padding: 30px 20px; backdrop-filter: blur(15px); display: flex; flex-direction: column; }
+        .logo h1 { font-family: 'Orbitron'; color: var(--blue); margin: 0; letter-spacing: 4px; font-size: 28px; }
+        
+        .tab-menu { margin-top: 50px; display: flex; flex-direction: column; gap: 5px; }
+        .tab-btn { background: none; border: none; color: white; padding: 18px; text-align: left; cursor: pointer; opacity: 0.4; font-weight: 700; transition: 0.3s; border-radius: 8px; }
+        .tab-btn.active { opacity: 1; color: var(--blue); background: rgba(0,210,255,0.1); border-left: 4px solid var(--blue); }
+        
+        .main { flex: 1; padding: 50px; display: flex; justify-content: center; align-items: center; }
+        .panel { display: none; width: 100%; max-width: 550px; animation: slideUp 0.3s ease-out; }
+        .panel.active { display: block; }
+        
+        @keyframes slideUp { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+
+        .card { background: var(--glass); border: 1px solid rgba(0,210,255,0.2); padding: 40px; border-radius: 20px; box-shadow: 0 20px 50px rgba(0,0,0,0.5); }
+        input { width: 100%; background: rgba(255,255,255,0.05); border: 1px solid rgba(0,210,255,0.2); padding: 15px; border-radius: 12px; color: white; margin-bottom: 15px; box-sizing: border-box; outline: none; }
+        input:focus { border-color: var(--blue); }
+        
+        .primary-btn { width: 100%; background: linear-gradient(135deg, #00d2ff, #3a7bd5); border: none; padding: 20px; color: white; font-weight: 900; border-radius: 12px; cursor: pointer; text-transform: uppercase; letter-spacing: 2px; }
+        .twitch-btn { background: #6441a5; margin-bottom: 15px; }
+        
+        #chat-preview { background: rgba(0,0,0,0.4); padding: 25px; border-radius: 15px; border-left: 5px solid var(--blue); min-height: 80px; font-family: monospace; font-size: 14px; overflow-y: auto; max-height: 200px; }
+        .setting-row { display: flex; align-items: center; justify-content: space-between; margin-bottom: 20px; background: rgba(255,255,255,0.05); padding: 15px; border-radius: 10px; }
+        
+        .success-box { display: none; background: rgba(0, 255, 0, 0.1); border: 1px solid #00ff00; color: #00ff00; padding: 15px; border-radius: 12px; margin-bottom: 15px; text-align: center; font-weight: bold; }
+    </style>
+</head>
+<body>
+
+    <div class="sidebar">
+        <div class="logo">
+            <h1>JAILEX</h1>
+            <div style="font-size:10px; opacity:0.6; letter-spacing: 2px;">STREAMING MADE EASY</div>
+        </div>
+        <nav class="tab-menu">
+            <button id="btn-sync" class="tab-btn active" onclick="showTab('sync')">QUICKSYNC</button>
+            <button id="btn-dash" class="tab-btn" onclick="showTab('dash')">DASHBOARD</button>
+            <button id="btn-audio" class="tab-btn" onclick="showTab('audio')">AUDIO ENGINE</button>
+        </nav>
+    </div>
+
+    <div class="main">
+        <div id="sync" class="panel active">
+            <div class="card">
+                <h2 style="font-family:'Orbitron'; color:var(--blue); margin-top:0;">ENGINE SYNC</h2>
+                
+                <button id="btn-twitch-auth" class="primary-btn twitch-btn" onclick="startTwitchAuth()">1. LINK TWITCH ACCOUNT</button>
+                <div id="twitch-success" class="success-box">✅ TWITCH LINKED</div>
+
+                <input type="text" id="twitchInput" placeholder="2. TWITCH USERNAME">
+                <input type="text" id="kickUser" placeholder="3. KICK USERNAME OR ID (e.g., 92474944)">
+                
+                <button class="primary-btn" onclick="masterInitialize()">Initialize Engine</button>
+            </div>
+        </div>
+
+        <div id="dash" class="panel">
+            <div class="card">
+                <h2 style="font-family:'Orbitron'; margin-top:0;">LIVE SIGNAL</h2>
+                <div id="chat-preview">Awaiting Signal Synchronization...</div>
+            </div>
+        </div>
+
+        <div id="audio" class="panel">
+            <div class="card">
+                <h2 style="font-family:'Orbitron'; color:var(--blue); margin-top:0;">AUDIO ENGINE</h2>
+                <div class="setting-row">
+                    <label>Include Username</label>
+                    <input type="checkbox" id="nameToggle" checked>
+                </div>
+                <div class="setting-row">
+                    <label>Voice Volume</label>
+                    <input type="range" id="volSlider" min="0" max="1" step="0.1" value="1">
+                </div>
+                <button class="primary-btn" style="padding:10px" onclick="speakMessage('Audio Test Positive')">Test Audio</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // -- TWITCH OAUTH SETTINGS --
+        const TWITCH_CLIENT_ID = 'nk06xpus7cc4naiif04xqqamwcf8rz'; 
+        // Dynamically gets your current URL (works locally AND on your host!)
+        const TWITCH_REDIRECT = window.location.origin + window.location.pathname; 
+        
+        let globalTwitchToken = null;
+
+        // Check for Token when page loads
+        window.onload = function() {
+            const hash = window.location.hash;
+            if (hash && hash.includes("access_token")) {
+                const params = new URLSearchParams(hash.substring(1));
+                globalTwitchToken = params.get('access_token');
+                
+                if (globalTwitchToken) {
+                    document.getElementById('btn-twitch-auth').style.display = 'none';
+                    document.getElementById('twitch-success').style.display = 'block';
+                    // Erase the ugly token from the address bar
+                    history.replaceState(null, null, window.location.pathname);
+                }
+            }
+        };
+
+        function startTwitchAuth() {
+            window.location.href = `https://id.twitch.tv/oauth2/authorize?client_id=${TWITCH_CLIENT_ID}&redirect_uri=${encodeURIComponent(TWITCH_REDIRECT)}&response_type=token&scope=chat:read+chat:edit&force_verify=true`;
+        }
+
+        function showTab(id) {
+            document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
+            document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+            document.getElementById(id).classList.add('active');
+            document.getElementById('btn-' + id).classList.add('active');
+        }
+
+        function masterInitialize() {
+            const kUser = document.getElementById('kickUser').value.trim().toLowerCase();
+            const tUser = document.getElementById('twitchInput').value.trim().toLowerCase();
+            const preview = document.getElementById('chat-preview');
+            
+            try {
+                if (typeof speakMessage === "function") speakMessage("Systems Online.");
+            } catch (err) { console.log("Audio skipped"); }
+
+            // Connect Twitch (Passing the token if we have it)
+            if (tUser && typeof connectToTwitch === "function") {
+                connectToTwitch(tUser, globalTwitchToken);
+            }
+
+            // Connect Kick (ID bypass + AllOrigins fallback)
+            if (kUser && typeof connectToKick === "function") {
+                if (/^\d+$/.test(kUser)) {
+                    preview.innerText = "KICK: DIRECT ID CONNECT...";
+                    connectToKick(kUser);
+                } else {
+                    preview.innerText = "KICK: LOCATING ID...";
+                    const kickApiUrl = `https://kick.com/api/v1/channels/${kUser}`;
+                    const proxyUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(kickApiUrl)}`;
+
+                    fetch(proxyUrl)
+                        .then(res => {
+                            if (!res.ok) throw new Error("Proxy connection failed.");
+                            return res.json();
+                        })
+                        .then(data => {
+                            if(data.chatroom && data.chatroom.id) {
+                                connectToKick(data.chatroom.id);
+                            } else { throw new Error("ID not found in response"); }
+                        })
+                        .catch(e => {
+                            console.log("Kick Fetch Error:", e);
+                            preview.innerText = "KICK SYNC FAILED. ENTER ID INSTEAD.";
+                            if (typeof speakMessage === "function") speakMessage("Kick connection failed.");
+                        });
+                }
+            }
+            
+            setTimeout(() => { showTab('dash'); }, 1000);
+        }
+    </script>
+    <script src="script.js"></script>
+    <script src="kick.js"></script>
+    <script src="twitch.js"></script>
+</body>
+</html>
